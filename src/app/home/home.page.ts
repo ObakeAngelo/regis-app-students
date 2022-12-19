@@ -1,23 +1,23 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy } from '@angular/core';
 import { AuthenticationService } from '../services/authentication.service';
 import { DataService, Student } from '../services/data.service';
 import { ToastController } from '@ionic/angular';
+import { BarcodeScanner } from '@capacitor-community/barcode-scanner';
 
 @Component({
   selector: 'app-home',
   templateUrl: './home.page.html',
   styleUrls: ['./home.page.scss'],
 })
-export class HomePage implements OnInit {
+export class HomePage implements OnDestroy {
   lessonCode: string = '';
+  scannedOutput: any;
 
   constructor(
     private authService: AuthenticationService,
     private dataService: DataService,
     private toastController: ToastController
   ) {}
-
-  ngOnInit() {}
 
   async presentToast(message: string) {
     const toast = await this.toastController.create({
@@ -29,26 +29,36 @@ export class HomePage implements OnInit {
     await toast.present();
   }
 
-  scan() {
-    console.log('scan');
-    console.log('lessonCode: ', this.lessonCode);
+  async checkPermission() {
+    // check or request permission
+    const status = await BarcodeScanner.checkPermission({ force: true });
 
+    if (status.granted) {
+      // the user granted permission
+      return true;
+    }
+
+    return false;
+  }
+
+  postClass(idClass: number) {
     const studentId = this.dataService.getStudentIdFromLocalstorage();
     const studentName = this.dataService.getStudentNameFromLocalstorage();
-    console.log('studentId: ', studentId);
 
     this.dataService
-      .getStudentByIdAndLessonId(studentId, Number(this.lessonCode))
+      .getStudentByIdAndLessonId(studentId, idClass)
       .subscribe((student) => {
         if (student && student.length > 0) {
           this.presentToast('usuario ya registro asistencia');
         } else {
           const lessonUser = {
             student: studentId,
-            lesson: Number(this.lessonCode),
+            lesson: idClass,
             name: studentName,
             date: new Date().toLocaleString(),
           } as Student;
+
+          console.log('lessonUser', lessonUser);
 
           this.dataService.postLessonUser(lessonUser).subscribe((_res) => {
             this.presentToast('asistencia registrada');
@@ -59,5 +69,38 @@ export class HomePage implements OnInit {
 
   logout() {
     this.authService.logout();
+  }
+
+  async startScanning() {
+    try {
+      const permission = this.checkPermission();
+      if (!permission) {
+        return;
+      }
+
+      await BarcodeScanner.hideBackground();
+      document.querySelector('body')?.classList.add('scanner-active');
+      const result = await BarcodeScanner.startScan();
+      if (result.hasContent) {
+        this.scannedOutput = result.content;
+
+        BarcodeScanner.showBackground();
+        document.querySelector('body')?.classList.remove('scanner-active');
+        this.postClass(Number(this.scannedOutput));
+      }
+    } catch (error) {
+      console.log(error);
+      this.stopScan();
+    }
+  }
+
+  stopScan() {
+    BarcodeScanner.showBackground();
+    BarcodeScanner.stopScan();
+    document.querySelector('body')?.classList.remove('scanner-active');
+  }
+
+  ngOnDestroy() {
+    this.stopScan();
   }
 }
